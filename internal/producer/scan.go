@@ -104,7 +104,7 @@ func (r Result) Snapshot() string {
 
 func trimOutput(s string) string {
 	s = strings.TrimSpace(s)
-	const max = 2000
+	const max = 200000
 	if len(s) <= max {
 		return s
 	}

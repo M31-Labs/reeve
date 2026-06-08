@@ -135,6 +135,14 @@ func BuildCandidatesWithOptions(ctx context.Context, spaces []fleet.SpaceStatus,
 				AgentURI: cfg.AgentURI,
 				GoBin:    cfg.Commands.Go,
 			}, nil)
+			signals = append(signals, producer.ScanGoDependencies(ctx, space.URI, space.WorkspacePath, producer.GoDepScanOptions{
+				AgentURI: cfg.AgentURI,
+				GoBin:    cfg.Commands.Go,
+			}, nil)...)
+			signals = append(signals, producer.ScanHyphaMaintenance(ctx, space.URI, space.WorkspacePath, producer.HyphaScanOptions{
+				AgentURI: cfg.AgentURI,
+				Command:  cfg.Commands.Hypha,
+			}, nil)...)
 			actions := producer.Plan(signals, existing)
 			for _, action := range actions {
 				if action.Kind == producer.ActionSkip {
