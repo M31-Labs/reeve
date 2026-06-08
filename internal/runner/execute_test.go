@@ -11,6 +11,7 @@ import (
 	"m31labs.dev/reeve/internal/config"
 	"m31labs.dev/reeve/internal/coord"
 	"m31labs.dev/reeve/internal/executor"
+	"m31labs.dev/reeve/internal/fleet"
 	"m31labs.dev/reeve/internal/landing"
 	"m31labs.dev/reeve/internal/taskplan"
 	isoworktree "m31labs.dev/reeve/internal/worktree"
@@ -94,6 +95,34 @@ func TestExecuteOnceDryRunSelectsHighestManagedTask(t *testing.T) {
 	}
 	if len(report.Updates) != 0 || report.Result != nil {
 		t.Fatalf("dry run should not mutate or execute: %#v", report)
+	}
+}
+
+func TestSelectBatchUsesOneTaskPerSpaceUpToPool(t *testing.T) {
+	candidates := []ExecutableCandidate{
+		{TaskID: "task-a1", SpaceURI: "hypha://m31labs/a", Score: 0.9},
+		{TaskID: "task-a2", SpaceURI: "hypha://m31labs/a", Score: 0.8},
+		{TaskID: "task-b1", SpaceURI: "hypha://m31labs/b", Score: 0.7},
+		{TaskID: "task-c1", SpaceURI: "hypha://m31labs/c", Score: 0.6},
+	}
+	got := selectBatch(candidates, 2)
+	if len(got) != 2 || got[0].TaskID != "task-a1" || got[1].TaskID != "task-b1" {
+		t.Fatalf("batch=%#v", got)
+	}
+}
+
+func TestExecutableCandidatesSkipsSpaceWithInFlightTask(t *testing.T) {
+	pendingA := managedTaskForSpace(t, "task-a-pending", "hypha://m31labs/a", "pending", 0.9)
+	runningA := managedTaskForSpace(t, "task-a-running", "hypha://m31labs/a", "in_progress", 0.2)
+	pendingB := managedTaskForSpace(t, "task-b-pending", "hypha://m31labs/b", "pending", 0.7)
+	spaces := []fleet.SpaceStatus{
+		{SpaceID: "m31labs/a", URI: "hypha://m31labs/a", Eligible: true, Priority: 0.8, WorkspaceName: "a", WorkspacePath: "/repo/a"},
+		{SpaceID: "m31labs/b", URI: "hypha://m31labs/b", Eligible: true, Priority: 0.8, WorkspaceName: "b", WorkspacePath: "/repo/b"},
+	}
+	cfg := config.DefaultConfig()
+	got := executableCandidates(spaces, []coord.Task{pendingA, runningA, pendingB}, cfg, time.Now())
+	if len(got) != 1 || got[0].TaskID != "task-b-pending" {
+		t.Fatalf("candidates=%#v", got)
 	}
 }
 
@@ -403,6 +432,12 @@ func managedTaskForTerminal(t *testing.T, retry int) coord.Task {
 	t.Helper()
 	desc := managedDescription(t, "build", "hypha://m31labs/reeve", 0.9, retry)
 	return coord.ClassifyTask("task-1", "Fix build", desc, "pending")
+}
+
+func managedTaskForSpace(t *testing.T, id, spaceURI, status string, severity float64) coord.Task {
+	t.Helper()
+	desc := managedDescription(t, id, spaceURI, severity, 0)
+	return coord.ClassifyTask(id, "Task "+id, desc, status)
 }
 
 func taskJSON(id, title, status, description string) string {

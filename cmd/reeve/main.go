@@ -27,7 +27,7 @@ Usage:
   reeve init --print
   reeve init --write [--config <path>]
   reeve run --dry-run --once [--json] [--config <path>]
-  reeve run --execute --once [--allow-registered-workspace] [--json] [--config <path>]
+  reeve run --execute --once [--dry-run] [--allow-registered-workspace] [--json] [--config <path>]
   reeve plan [--scan] [--apply] [--json] [--config <path>]
   reeve status --json [--config <path>]
   reeve doctor [--json] [--config <path>]
@@ -170,7 +170,7 @@ func cmdRun(args []string, stdout io.Writer) error {
 		if !*once {
 			return errors.New("run --execute requires --once")
 		}
-		report, err := runner.ExecuteOnce(context.Background(), cfg, runner.ExecutionOptions{
+		report, err := runner.ExecutePass(context.Background(), cfg, runner.ExecutionOptions{
 			DryRun:                   *dryRun,
 			AllowRegisteredWorkspace: *allowRegistered,
 		})
@@ -180,7 +180,7 @@ func cmdRun(args []string, stdout io.Writer) error {
 		if *jsonOut {
 			return writeJSON(stdout, report)
 		}
-		renderExecutionReport(stdout, report)
+		renderExecutionPassReport(stdout, report)
 		return nil
 	}
 	if !*dryRun || !*once {
@@ -195,6 +195,24 @@ func cmdRun(args []string, stdout io.Writer) error {
 	}
 	renderReport(stdout, report)
 	return nil
+}
+
+func renderExecutionPassReport(w io.Writer, report runner.ExecutionPassReport) {
+	mode := "execute"
+	if report.DryRun {
+		mode = "execute dry-run"
+	}
+	fmt.Fprintf(w, "Reeve %s: pool=%d selected=%d\n", mode, report.PoolSize, len(report.Selected))
+	for _, warning := range report.Warnings {
+		fmt.Fprintf(w, "warn: %s\n", warning)
+	}
+	for _, selected := range report.Selected {
+		fmt.Fprintf(w, "selected: %s score=%.3f space=%s %s\n",
+			selected.TaskID, selected.Score, selected.SpaceID, selected.Title)
+	}
+	for _, execution := range report.Executions {
+		renderExecutionReport(w, execution)
+	}
 }
 
 func renderExecutionReport(w io.Writer, report runner.ExecutionReport) {

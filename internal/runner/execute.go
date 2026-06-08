@@ -42,6 +42,15 @@ type ExecutionReport struct {
 	Warnings    []string                  `json:"warnings,omitempty"`
 }
 
+type ExecutionPassReport struct {
+	GeneratedAt string                `json:"generated_at"`
+	DryRun      bool                  `json:"dry_run"`
+	PoolSize    int                   `json:"pool_size"`
+	Selected    []ExecutableCandidate `json:"selected,omitempty"`
+	Executions  []ExecutionReport     `json:"executions,omitempty"`
+	Warnings    []string              `json:"warnings,omitempty"`
+}
+
 type ExecutableCandidate struct {
 	TaskID        string          `json:"task_id"`
 	Title         string          `json:"title"`
@@ -61,20 +70,57 @@ func ExecuteOnce(ctx context.Context, cfg config.Config, opts ExecutionOptions) 
 	if err != nil {
 		return ExecutionReport{}, err
 	}
-	out := ExecutionReport{
-		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
-		DryRun:      opts.DryRun,
-		Warnings:    report.Warnings,
-	}
 	now := opts.Now
 	if now.IsZero() {
 		now = time.Now()
 	}
 	candidates := executableCandidates(report.Spaces, report.Coord.Tasks, cfg, now)
 	if len(candidates) == 0 {
+		return ExecutionReport{GeneratedAt: time.Now().UTC().Format(time.RFC3339), DryRun: opts.DryRun, Warnings: report.Warnings}, nil
+	}
+	return executeCandidate(ctx, cfg, opts, report, candidates[0], now)
+}
+
+func ExecutePass(ctx context.Context, cfg config.Config, opts ExecutionOptions) (ExecutionPassReport, error) {
+	report, err := BuildReportWithOptions(ctx, cfg, Options{DryRun: true})
+	if err != nil {
+		return ExecutionPassReport{}, err
+	}
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	poolSize := cfg.PoolSize
+	if poolSize <= 0 {
+		poolSize = 1
+	}
+	selected := selectBatch(executableCandidates(report.Spaces, report.Coord.Tasks, cfg, now), poolSize)
+	out := ExecutionPassReport{
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		DryRun:      opts.DryRun,
+		PoolSize:    poolSize,
+		Selected:    selected,
+		Warnings:    report.Warnings,
+	}
+	if opts.DryRun {
 		return out, nil
 	}
-	selected := candidates[0]
+	for _, candidate := range selected {
+		execution, err := executeCandidate(ctx, cfg, opts, report, candidate, now)
+		out.Executions = append(out.Executions, execution)
+		if err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+func executeCandidate(ctx context.Context, cfg config.Config, opts ExecutionOptions, report Report, selected ExecutableCandidate, now time.Time) (ExecutionReport, error) {
+	out := ExecutionReport{
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		DryRun:      opts.DryRun,
+		Warnings:    report.Warnings,
+	}
 	if opts.DryRun {
 		out.Selected = &selected
 		return out, nil
@@ -163,6 +209,25 @@ func ExecuteOnce(ctx context.Context, cfg config.Config, opts ExecutionOptions) 
 	return out, nil
 }
 
+func selectBatch(candidates []ExecutableCandidate, poolSize int) []ExecutableCandidate {
+	if poolSize <= 0 {
+		return nil
+	}
+	seenSpaces := map[string]bool{}
+	out := make([]ExecutableCandidate, 0, poolSize)
+	for _, candidate := range candidates {
+		if seenSpaces[candidate.SpaceURI] {
+			continue
+		}
+		seenSpaces[candidate.SpaceURI] = true
+		out = append(out, candidate)
+		if len(out) >= poolSize {
+			break
+		}
+	}
+	return out
+}
+
 func landingBody(task coord.Task, result executor.LifecycleResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Automated Reeve maintenance change.\n\n")
@@ -200,9 +265,13 @@ func executableCandidates(spaces []fleet.SpaceStatus, tasks []coord.Task, cfg co
 			byURI[space.URI] = space
 		}
 	}
+	inFlight := inFlightSpaces(tasks)
 	var out []ExecutableCandidate
 	for _, task := range tasks {
 		if !task.Managed || !openForExecution(task.Status) || backingOff(task, now) {
+			continue
+		}
+		if inFlight[task.Trailer.SpaceURI] {
 			continue
 		}
 		space, ok := byURI[task.Trailer.SpaceURI]
@@ -235,6 +304,19 @@ func executableCandidates(spaces []fleet.SpaceStatus, tasks []coord.Task, cfg co
 		}
 		return out[i].Score > out[j].Score
 	})
+	return out
+}
+
+func inFlightSpaces(tasks []coord.Task) map[string]bool {
+	out := map[string]bool{}
+	for _, task := range tasks {
+		if !task.Managed || task.Status != graftcoord.StatusInProgress {
+			continue
+		}
+		if task.Trailer.SpaceURI != "" {
+			out[task.Trailer.SpaceURI] = true
+		}
+	}
 	return out
 }
 

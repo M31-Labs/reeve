@@ -54,6 +54,9 @@ Implemented now:
 - `reeve plan --scan --apply` creates or reopens Graft coord tasks.
 - `reeve run --execute --once` selects one managed task, creates an isolated
   Buckley worktree, wraps execution in Hyphae rituals, and updates Graft status.
+- `reeve run --execute --once --dry-run` previews a pool-aware assignment pass,
+  using `pool_size`, at most one task per space, and no space that already has
+  in-progress Reeve work.
 - Clean, allowed, green landed outcomes push the integration branch and open a
   draft PR through `gh`.
 - Retry, backoff, dead-letter, quarantine, and propose-only paths have focused
@@ -65,7 +68,7 @@ Implemented now:
 Still in progress for full v1:
 
 - Arbiter-backed ranking/governance as the final selection oracle.
-- Pool-wide multi-slot polling and refill cadence.
+- Long-running host service mode with poll/refill cadence.
 - Spend accounting from real Buckley token usage.
 - 2-3 live maintenance opt-in spaces and a full working-day unattended run.
 
@@ -191,6 +194,11 @@ For a read-only execution preview:
 reeve run --execute --dry-run --once --json
 ```
 
+The execution path already uses `pool_size` for each one-shot pass. Today it
+runs the selected assignments sequentially from the CLI; the remaining v1 work
+is turning that pass into a long-running service loop that keeps the pool filled
+over time.
+
 ## Configuration
 
 Starter config lives at `~/.reeve/config.toml`:
@@ -258,7 +266,8 @@ and Hyphae/Graft/Buckley integrations are explicit CLI boundaries.
 ## Roadmap To V1
 
 - Replace weighted in-process ranking with Arbiter strategy evaluation.
-- Run a pool of assignments with one in-flight task per space.
+- Turn the pool-aware one-shot pass into a long-running host service with refill
+  cadence.
 - Record token spend from Buckley runs into the Reeve spend counter.
 - Seed 2-3 quiet maintenance spaces and run a full working-day unattended smoke.
 - Document the resulting traces, spores, receipts, and PR queue as the v1 proof.
