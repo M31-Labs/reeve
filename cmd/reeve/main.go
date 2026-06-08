@@ -27,6 +27,7 @@ Usage:
   reeve init --print
   reeve init --write [--config <path>]
   reeve run --dry-run --once [--json] [--config <path>]
+  reeve run --execute --once [--allow-registered-workspace] [--json] [--config <path>]
   reeve plan [--scan] [--apply] [--json] [--config <path>]
   reeve status --json [--config <path>]
   reeve doctor [--json] [--config <path>]
@@ -155,16 +156,35 @@ func cmdRun(args []string, stdout io.Writer) error {
 	configPath := fs.String("config", config.DefaultPath(), "config path")
 	dryRun := fs.Bool("dry-run", false, "print planned actions without mutation")
 	once := fs.Bool("once", false, "run one assignment pass")
+	execute := fs.Bool("execute", false, "execute one managed coord task")
+	allowRegistered := fs.Bool("allow-registered-workspace", false, "allow execution directly in a registered workspace")
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if !*dryRun || !*once {
-		return errors.New("phase 0B only supports run --dry-run --once")
-	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		return err
+	}
+	if *execute {
+		if !*once {
+			return errors.New("run --execute requires --once")
+		}
+		report, err := runner.ExecuteOnce(context.Background(), cfg, runner.ExecutionOptions{
+			DryRun:                   *dryRun,
+			AllowRegisteredWorkspace: *allowRegistered,
+		})
+		if err != nil {
+			return err
+		}
+		if *jsonOut {
+			return writeJSON(stdout, report)
+		}
+		renderExecutionReport(stdout, report)
+		return nil
+	}
+	if !*dryRun || !*once {
+		return errors.New("run requires either --dry-run --once or --execute --once")
 	}
 	report, err := runner.BuildReport(context.Background(), cfg, true)
 	if err != nil {
@@ -175,6 +195,37 @@ func cmdRun(args []string, stdout io.Writer) error {
 	}
 	renderReport(stdout, report)
 	return nil
+}
+
+func renderExecutionReport(w io.Writer, report runner.ExecutionReport) {
+	mode := "execute"
+	if report.DryRun {
+		mode = "execute dry-run"
+	}
+	fmt.Fprintf(w, "Reeve %s: ", mode)
+	if report.Selected == nil {
+		fmt.Fprintln(w, "no managed task selected")
+	} else {
+		fmt.Fprintf(w, "selected %s score=%.3f %s\n", report.Selected.TaskID, report.Selected.Score, report.Selected.Title)
+		fmt.Fprintf(w, "  space=%s workspace=%s signal=%s target=%s\n",
+			report.Selected.SpaceID, report.Selected.WorkspaceName, report.Selected.SignalKind, report.Selected.Target)
+	}
+	for _, warning := range report.Warnings {
+		fmt.Fprintf(w, "warn: %s\n", warning)
+	}
+	for _, update := range report.Updates {
+		status := update.Status
+		if update.Error != "" {
+			status = "error: " + update.Error
+		}
+		fmt.Fprintf(w, "coord: %s %s\n", update.TaskID, status)
+	}
+	if report.Result != nil {
+		fmt.Fprintf(w, "result: %s %s\n", report.Result.Decision.State, report.Result.Decision.Reason)
+		if report.Result.SporeID != "" {
+			fmt.Fprintf(w, "spore: %s\n", report.Result.SporeID)
+		}
+	}
 }
 
 func cmdStatus(args []string, stdout io.Writer) error {

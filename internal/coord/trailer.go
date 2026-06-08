@@ -56,6 +56,29 @@ func AppendTrailer(description string, t Trailer) (string, error) {
 	return description + fence, nil
 }
 
+func ReplaceTrailer(description string, t Trailer) (string, error) {
+	fence, err := RenderTrailer(t)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(strings.ReplaceAll(description, "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) != "```"+FenceName {
+			continue
+		}
+		for j := i + 1; j < len(lines); j++ {
+			if strings.TrimSpace(lines[j]) == "```" {
+				out := append([]string{}, lines[:i]...)
+				out = append(out, strings.TrimRight(fence, "\n"))
+				out = append(out, lines[j+1:]...)
+				return strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n", nil
+			}
+		}
+		return "", errors.New("unterminated reeve-task trailer")
+	}
+	return AppendTrailer(description, t)
+}
+
 func ParseTrailer(description string) (Trailer, error) {
 	body, ok := extractFence(description)
 	if !ok {
