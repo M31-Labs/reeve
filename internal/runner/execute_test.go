@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"strings"
 	"testing"
+	"time"
 
 	"m31labs.dev/reeve/internal/config"
 	"m31labs.dev/reeve/internal/coord"
@@ -136,6 +137,7 @@ func TestExecuteOnceRetriesFailedLifecycle(t *testing.T) {
 		Hypha:                    &execFakeHypha{},
 		Worktree:                 &execFakeWorktree{heads: []string{"abc", "abc"}, dirty: true},
 		AllowRegisteredWorkspace: true,
+		Now:                      time.Date(2026, 6, 8, 8, 0, 0, 0, time.UTC),
 		RunBuckley: func(context.Context, taskplan.CreateSpec, executor.TaskRunOptions) executor.BuckleyRun {
 			return executor.BuckleyRun{ExitCode: 1, Approval: executor.ApprovalUnknown, Error: "failed"}
 		},
@@ -160,6 +162,65 @@ func TestExecuteOnceRetriesFailedLifecycle(t *testing.T) {
 	}
 	if trailer.RetryCount != 1 || report.Updates[len(report.Updates)-1].Status != "pending" {
 		t.Fatalf("retry=%d updates=%#v", trailer.RetryCount, report.Updates)
+	}
+	if trailer.LastDisposition != string(executor.StateFailed) || trailer.LastError == "" || trailer.NextAttemptAt != "2026-06-08T08:15:00Z" {
+		t.Fatalf("trailer=%#v", trailer)
+	}
+}
+
+func TestExecuteOnceSkipsTaskUntilBackoffExpires(t *testing.T) {
+	tmp := t.TempDir()
+	dbPath := writeExecutionIndex(t, tmp, `{"uri":"hypha://m31labs/reeve","mode":"maintenance","priority":0.8}`)
+	desc := managedDescription(t, "build", "hypha://m31labs/reeve", 0.9, 1)
+	trailer, err := coord.ParseTrailer(desc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trailer.NextAttemptAt = "2026-06-08T09:00:00Z"
+	desc, err = coord.ReplaceTrailer(desc, trailer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := executionConfig(t, tmp, dbPath, []string{taskJSON("task-1", "Fix build", "pending", desc)})
+	report, err := ExecuteOnce(context.Background(), cfg, ExecutionOptions{
+		DryRun: true,
+		Now:    time.Date(2026, 6, 8, 8, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Selected != nil {
+		t.Fatalf("backing off task should not be selected: %#v", report.Selected)
+	}
+}
+
+func TestTerminalUpdateDeadLettersAfterRetryCap(t *testing.T) {
+	task := managedTaskForTerminal(t, 3)
+	status, description, reason := terminalUpdate(task, executor.Decision{State: executor.StateFailed, Reason: "failed"}, nil, 3, 15*time.Minute, time.Date(2026, 6, 8, 8, 0, 0, 0, time.UTC))
+	if status != "blocked" || reason != "retry budget exhausted" {
+		t.Fatalf("status=%s reason=%s", status, reason)
+	}
+	trailer, err := coord.ParseTrailer(description)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trailer.RetryCount != 4 || trailer.LastDisposition != "dead-letter" || trailer.NextAttemptAt != "" {
+		t.Fatalf("trailer=%#v", trailer)
+	}
+}
+
+func TestTerminalUpdateProposedCompletesWithDisposition(t *testing.T) {
+	task := managedTaskForTerminal(t, 0)
+	status, description, reason := terminalUpdate(task, executor.Decision{State: executor.StateProposed, Reason: "approval requires review"}, nil, 3, 15*time.Minute, time.Now())
+	if status != "completed" || reason != string(executor.StateProposed) {
+		t.Fatalf("status=%s reason=%s", status, reason)
+	}
+	trailer, err := coord.ParseTrailer(description)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trailer.LastDisposition != string(executor.StateProposed) || trailer.LastError != "approval requires review" {
+		t.Fatalf("trailer=%#v", trailer)
 	}
 }
 
@@ -271,6 +332,12 @@ func managedDescription(t *testing.T, key, space string, severity float64, retry
 		t.Fatal(err)
 	}
 	return desc
+}
+
+func managedTaskForTerminal(t *testing.T, retry int) coord.Task {
+	t.Helper()
+	desc := managedDescription(t, "build", "hypha://m31labs/reeve", 0.9, retry)
+	return coord.ClassifyTask("task-1", "Fix build", desc, "pending")
 }
 
 func taskJSON(id, title, status, description string) string {

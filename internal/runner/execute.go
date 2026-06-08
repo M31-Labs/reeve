@@ -21,6 +21,7 @@ import (
 type ExecutionOptions struct {
 	DryRun                   bool
 	AllowRegisteredWorkspace bool
+	Now                      time.Time
 	Hypha                    executor.HyphaRituals
 	Worktree                 executor.WorktreeOps
 	CreateWorktree           func(context.Context, string, string, string, string) (isoworktree.Worktree, error)
@@ -62,7 +63,11 @@ func ExecuteOnce(ctx context.Context, cfg config.Config, opts ExecutionOptions) 
 		DryRun:      opts.DryRun,
 		Warnings:    report.Warnings,
 	}
-	candidates := executableCandidates(report.Spaces, report.Coord.Tasks, cfg)
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	candidates := executableCandidates(report.Spaces, report.Coord.Tasks, cfg, now)
 	if len(candidates) == 0 {
 		return out, nil
 	}
@@ -118,7 +123,7 @@ func ExecuteOnce(ctx context.Context, cfg config.Config, opts ExecutionOptions) 
 		BuckleyCommand:  cfg.Commands.Buckley,
 	}, opts.Hypha, opts.Worktree, opts.RunBuckley)
 	out.Result = &result
-	status, description, reason := terminalUpdate(task, result.Decision, lifecycleErr, cfg.MaxRetries)
+	status, description, reason := terminalUpdate(task, result.Decision, lifecycleErr, cfg.MaxRetries, cfg.RetryBackoff.Duration, now)
 	done := graftcoord.UpdateTask(ctx, cfg.Commands.Graft, graftcoord.TaskUpdate{
 		TaskID:      task.ID,
 		Status:      status,
@@ -134,7 +139,7 @@ func ExecuteOnce(ctx context.Context, cfg config.Config, opts ExecutionOptions) 
 	return out, nil
 }
 
-func executableCandidates(spaces []fleet.SpaceStatus, tasks []coord.Task, cfg config.Config) []ExecutableCandidate {
+func executableCandidates(spaces []fleet.SpaceStatus, tasks []coord.Task, cfg config.Config, now time.Time) []ExecutableCandidate {
 	byURI := map[string]fleet.SpaceStatus{}
 	for _, space := range spaces {
 		if space.Eligible {
@@ -143,7 +148,7 @@ func executableCandidates(spaces []fleet.SpaceStatus, tasks []coord.Task, cfg co
 	}
 	var out []ExecutableCandidate
 	for _, task := range tasks {
-		if !task.Managed || !openForExecution(task.Status) {
+		if !task.Managed || !openForExecution(task.Status) || backingOff(task, now) {
 			continue
 		}
 		space, ok := byURI[task.Trailer.SpaceURI]
@@ -210,16 +215,29 @@ func selectedTaskAndSpace(selected ExecutableCandidate, tasks []coord.Task, spac
 	return task, space, taskOK && spaceOK
 }
 
-func terminalUpdate(task coord.Task, decision executor.Decision, lifecycleErr error, maxRetries int) (status, description, reason string) {
+func terminalUpdate(task coord.Task, decision executor.Decision, lifecycleErr error, maxRetries int, retryBackoff time.Duration, now time.Time) (status, description, reason string) {
 	if lifecycleErr != nil {
 		decision = executor.Decision{State: executor.StateFailed, Reason: lifecycleErr.Error()}
 	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	next := task.Trailer
+	next.LastDisposition = string(decision.State)
+	next.LastError = decision.Reason
 	switch decision.State {
 	case executor.StateLanded, executor.StateNoOp:
-		return graftcoord.StatusCompleted, "", string(decision.State)
+		next.NextAttemptAt = ""
+		updated, err := coord.ReplaceTrailer(task.Description, next)
+		if err != nil {
+			return graftcoord.StatusCompleted, "", string(decision.State)
+		}
+		return graftcoord.StatusCompleted, updated, string(decision.State)
 	case executor.StateFailed:
-		next := task.Trailer
 		next.RetryCount++
+		if retryBackoff > 0 {
+			next.NextAttemptAt = now.Add(retryBackoff * time.Duration(next.RetryCount)).UTC().Format(time.RFC3339)
+		}
 		updated, err := coord.ReplaceTrailer(task.Description, next)
 		if err != nil {
 			return graftcoord.StatusBlocked, "", "retry trailer update failed"
@@ -227,12 +245,37 @@ func terminalUpdate(task coord.Task, decision executor.Decision, lifecycleErr er
 		if maxRetries <= 0 || next.RetryCount <= maxRetries {
 			return graftcoord.StatusPending, updated, "retry"
 		}
+		next.LastDisposition = "dead-letter"
+		next.NextAttemptAt = ""
+		updated, err = coord.ReplaceTrailer(task.Description, next)
+		if err != nil {
+			return graftcoord.StatusBlocked, "", "dead-letter trailer update failed"
+		}
 		return graftcoord.StatusBlocked, updated, "retry budget exhausted"
 	case executor.StateProposed, executor.StateSkipped:
-		return graftcoord.StatusBlocked, "", string(decision.State)
+		next.NextAttemptAt = ""
+		updated, err := coord.ReplaceTrailer(task.Description, next)
+		if err != nil {
+			return graftcoord.StatusCompleted, "", string(decision.State)
+		}
+		return graftcoord.StatusCompleted, updated, string(decision.State)
 	default:
 		return graftcoord.StatusBlocked, "", "unknown terminal state"
 	}
+}
+
+func backingOff(task coord.Task, now time.Time) bool {
+	if strings.TrimSpace(task.Trailer.NextAttemptAt) == "" {
+		return false
+	}
+	next, err := time.Parse(time.RFC3339, task.Trailer.NextAttemptAt)
+	if err != nil {
+		return false
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return now.Before(next)
 }
 
 func pathWithin(root, path string) bool {

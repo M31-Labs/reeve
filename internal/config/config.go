@@ -34,6 +34,7 @@ type Config struct {
 	PoolSize        int             `toml:"pool_size" json:"pool_size"`
 	RefillThreshold int             `toml:"refill_threshold" json:"refill_threshold"`
 	MaxRetries      int             `toml:"max_retries" json:"max_retries"`
+	RetryBackoff    Duration        `toml:"retry_backoff" json:"retry_backoff"`
 	AssessThreshold string          `toml:"assess_threshold" json:"assess_threshold"`
 	PollInterval    Duration        `toml:"poll_interval" json:"poll_interval"`
 	StalenessCap    Duration        `toml:"staleness_cap" json:"staleness_cap"`
@@ -81,6 +82,7 @@ func DefaultConfig() Config {
 		PoolSize:        3,
 		RefillThreshold: 2,
 		MaxRetries:      3,
+		RetryBackoff:    Duration{Duration: 15 * time.Minute},
 		AssessThreshold: "aligned",
 		PollInterval:    Duration{Duration: 60 * time.Second},
 		StalenessCap:    Duration{Duration: 168 * time.Hour},
@@ -145,6 +147,9 @@ func Normalize(cfg Config) (Config, error) {
 	}
 	if cfg.MaxRetries == 0 {
 		cfg.MaxRetries = def.MaxRetries
+	}
+	if cfg.RetryBackoff.Duration == 0 {
+		cfg.RetryBackoff = def.RetryBackoff
 	}
 	if cfg.AssessThreshold == "" {
 		cfg.AssessThreshold = def.AssessThreshold
@@ -319,6 +324,7 @@ signing_identity = "identity://m31labs/reeve-conductor"
 pool_size = 3
 refill_threshold = 2
 max_retries = 3
+retry_backoff = "15m"
 assess_threshold = "aligned"
 poll_interval = "60s"
 staleness_cap = "168h"

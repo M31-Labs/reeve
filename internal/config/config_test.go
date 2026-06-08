@@ -32,6 +32,9 @@ graft = "/tmp/graft"
 	if cfg.PollInterval.Duration != 30*time.Second {
 		t.Fatalf("PollInterval=%s", cfg.PollInterval)
 	}
+	if cfg.RetryBackoff.Duration != 15*time.Minute {
+		t.Fatalf("RetryBackoff=%s", cfg.RetryBackoff)
+	}
 	if cfg.StateDir != filepath.Join(tmp, ".reeve", "state") {
 		t.Fatalf("StateDir=%q", cfg.StateDir)
 	}

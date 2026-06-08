@@ -11,15 +11,18 @@ import (
 const FenceName = "reeve-task"
 
 type Trailer struct {
-	DedupKey       string  `yaml:"dedup_key" json:"dedup_key"`
-	SpaceURI       string  `yaml:"space_uri" json:"space_uri"`
-	SignalKind     string  `yaml:"signal_kind" json:"signal_kind"`
-	Target         string  `yaml:"target" json:"target"`
-	Severity       float64 `yaml:"severity" json:"severity"`
-	CreatedBy      string  `yaml:"created_by" json:"created_by"`
-	SourceSnapshot string  `yaml:"source_snapshot,omitempty" json:"source_snapshot,omitempty"`
-	RetryCount     int     `yaml:"retry_count" json:"retry_count"`
-	PreviousTaskID string  `yaml:"previous_task_id,omitempty" json:"previous_task_id,omitempty"`
+	DedupKey        string  `yaml:"dedup_key" json:"dedup_key"`
+	SpaceURI        string  `yaml:"space_uri" json:"space_uri"`
+	SignalKind      string  `yaml:"signal_kind" json:"signal_kind"`
+	Target          string  `yaml:"target" json:"target"`
+	Severity        float64 `yaml:"severity" json:"severity"`
+	CreatedBy       string  `yaml:"created_by" json:"created_by"`
+	SourceSnapshot  string  `yaml:"source_snapshot,omitempty" json:"source_snapshot,omitempty"`
+	RetryCount      int     `yaml:"retry_count" json:"retry_count"`
+	PreviousTaskID  string  `yaml:"previous_task_id,omitempty" json:"previous_task_id,omitempty"`
+	LastDisposition string  `yaml:"last_disposition,omitempty" json:"last_disposition,omitempty"`
+	LastError       string  `yaml:"last_error,omitempty" json:"last_error,omitempty"`
+	NextAttemptAt   string  `yaml:"next_attempt_at,omitempty" json:"next_attempt_at,omitempty"`
 }
 
 type Task struct {
