@@ -39,6 +39,7 @@ type Config struct {
 	StalenessCap    Duration        `toml:"staleness_cap" json:"staleness_cap"`
 	BlastCap        int             `toml:"blast_cap" json:"blast_cap"`
 	StateDir        string          `toml:"state_dir" json:"state_dir"`
+	WorktreeRoot    string          `toml:"worktree_root" json:"worktree_root"`
 	QuarantineDir   string          `toml:"quarantine_dir" json:"quarantine_dir"`
 	HyphaIndexPath  string          `toml:"hypha_index_path" json:"hypha_index_path"`
 	Paused          bool            `toml:"paused" json:"paused"`
@@ -85,6 +86,7 @@ func DefaultConfig() Config {
 		StalenessCap:    Duration{Duration: 168 * time.Hour},
 		BlastCap:        50,
 		StateDir:        "~/.reeve/state",
+		WorktreeRoot:    "~/.reeve/worktrees",
 		QuarantineDir:   "~/.reeve/quarantine",
 		HyphaIndexPath:  "~/.hyphae/.index/hyphae.db",
 		Budget: Budget{
@@ -159,6 +161,9 @@ func Normalize(cfg Config) (Config, error) {
 	if cfg.StateDir == "" {
 		cfg.StateDir = def.StateDir
 	}
+	if cfg.WorktreeRoot == "" {
+		cfg.WorktreeRoot = def.WorktreeRoot
+	}
 	if cfg.QuarantineDir == "" {
 		cfg.QuarantineDir = def.QuarantineDir
 	}
@@ -197,6 +202,9 @@ func Normalize(cfg Config) (Config, error) {
 	}
 	var err error
 	if cfg.StateDir, err = ExpandPath(cfg.StateDir); err != nil {
+		return Config{}, err
+	}
+	if cfg.WorktreeRoot, err = ExpandPath(cfg.WorktreeRoot); err != nil {
 		return Config{}, err
 	}
 	if cfg.QuarantineDir, err = ExpandPath(cfg.QuarantineDir); err != nil {
@@ -316,6 +324,7 @@ poll_interval = "60s"
 staleness_cap = "168h"
 blast_cap = 50
 state_dir = "~/.reeve/state"
+worktree_root = "~/.reeve/worktrees"
 quarantine_dir = "~/.reeve/quarantine"
 hypha_index_path = "~/.hyphae/.index/hyphae.db"
 paused = false

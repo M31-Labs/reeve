@@ -10,6 +10,7 @@ import (
 	"m31labs.dev/reeve/internal/coord"
 	"m31labs.dev/reeve/internal/executor"
 	"m31labs.dev/reeve/internal/taskplan"
+	isoworktree "m31labs.dev/reeve/internal/worktree"
 	_ "modernc.org/sqlite"
 )
 
@@ -162,6 +163,37 @@ func TestExecuteOnceRetriesFailedLifecycle(t *testing.T) {
 	}
 }
 
+func TestExecuteOnceCreatesIsolatedWorktreeForRegisteredWorkspace(t *testing.T) {
+	tmp := t.TempDir()
+	dbPath := writeExecutionIndex(t, tmp, `{"uri":"hypha://m31labs/reeve","mode":"maintenance","priority":0.8}`)
+	desc := managedDescription(t, "build", "hypha://m31labs/reeve", 0.9, 0)
+	cfg := executionConfigWithWorkspace(t, tmp, dbPath, tmp+"/registered/reeve", []string{taskJSON("task-1", "Fix build", "pending", desc)})
+	var createArgs []string
+	report, err := ExecuteOnce(context.Background(), cfg, ExecutionOptions{
+		Hypha:    &execFakeHypha{},
+		Worktree: &execFakeWorktree{heads: []string{"abc", "abc"}},
+		CreateWorktree: func(_ context.Context, command string, sourcePath string, root string, branch string) (isoworktree.Worktree, error) {
+			createArgs = []string{command, sourcePath, root, branch}
+			return isoworktree.Worktree{SourcePath: sourcePath, Root: root, Branch: branch, Path: root + "/reeve/" + branch + "/source"}, nil
+		},
+		RunBuckley: func(context.Context, taskplan.CreateSpec, executor.TaskRunOptions) executor.BuckleyRun {
+			return executor.BuckleyRun{ExitCode: 0, Approval: executor.ApprovalAllow}
+		},
+		UpdateExec: func(context.Context, string, []string) ([]byte, error) {
+			return []byte(`{"ok":true}`), nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(createArgs) != 4 || createArgs[1] != tmp+"/registered/reeve" || createArgs[2] != cfg.WorktreeRoot {
+		t.Fatalf("createArgs=%#v root=%s", createArgs, cfg.WorktreeRoot)
+	}
+	if report.Worktree == nil || report.Selected.WorkspacePath != report.Worktree.Path {
+		t.Fatalf("report=%#v", report)
+	}
+}
+
 func writeExecutionIndex(t *testing.T, dir string, metadata string) string {
 	t.Helper()
 	dbPath := dir + "/hyphae.db"
@@ -184,7 +216,11 @@ func writeExecutionIndex(t *testing.T, dir string, metadata string) string {
 
 func executionConfig(t *testing.T, dir, dbPath string, tasks []string) config.Config {
 	t.Helper()
-	workspacePath := dir + "/state/worktrees/reeve"
+	return executionConfigWithWorkspace(t, dir, dbPath, dir+"/worktrees/reeve", tasks)
+}
+
+func executionConfigWithWorkspace(t *testing.T, dir, dbPath string, workspacePath string, tasks []string) config.Config {
+	t.Helper()
 	hypha := writeExecutable(t, dir, "hypha", `#!/bin/sh
 case "$1 $2" in
   "trace list") echo '{"ok":true,"data":[],"warnings":[],"errors":[]}' ;;
@@ -204,6 +240,7 @@ esac
 		AgentURI:       "agent://reeve/conductor",
 		HyphaIndexPath: dbPath,
 		StateDir:       dir + "/state",
+		WorktreeRoot:   dir + "/worktrees",
 		QuarantineDir:  dir + "/quarantine",
 		MaxRetries:     3,
 		Commands: config.Commands{

@@ -15,6 +15,7 @@ import (
 	"m31labs.dev/reeve/internal/fleet"
 	"m31labs.dev/reeve/internal/graftcoord"
 	"m31labs.dev/reeve/internal/ranking"
+	isoworktree "m31labs.dev/reeve/internal/worktree"
 )
 
 type ExecutionOptions struct {
@@ -22,6 +23,7 @@ type ExecutionOptions struct {
 	AllowRegisteredWorkspace bool
 	Hypha                    executor.HyphaRituals
 	Worktree                 executor.WorktreeOps
+	CreateWorktree           func(context.Context, string, string, string, string) (isoworktree.Worktree, error)
 	RunBuckley               executor.BuckleySpecRunner
 	UpdateExec               graftcoord.ExecFunc
 }
@@ -30,6 +32,7 @@ type ExecutionReport struct {
 	GeneratedAt string                    `json:"generated_at"`
 	DryRun      bool                      `json:"dry_run"`
 	Selected    *ExecutableCandidate      `json:"selected,omitempty"`
+	Worktree    *isoworktree.Worktree     `json:"worktree,omitempty"`
 	Updates     []graftcoord.UpdateResult `json:"updates,omitempty"`
 	Result      *executor.LifecycleResult `json:"result,omitempty"`
 	Warnings    []string                  `json:"warnings,omitempty"`
@@ -64,18 +67,31 @@ func ExecuteOnce(ctx context.Context, cfg config.Config, opts ExecutionOptions) 
 		return out, nil
 	}
 	selected := candidates[0]
-	out.Selected = &selected
 	if opts.DryRun {
+		out.Selected = &selected
 		return out, nil
 	}
 	task, space, ok := selectedTaskAndSpace(selected, report.Coord.Tasks, report.Spaces)
 	if !ok {
 		return out, errors.New("selected task or space disappeared")
 	}
-	worktreeRoot := filepath.Join(cfg.StateDir, "worktrees")
+	worktreeRoot := cfg.WorktreeRoot
 	if !opts.AllowRegisteredWorkspace && !pathWithin(worktreeRoot, space.WorkspacePath) {
-		return out, fmt.Errorf("selected workspace %s is not below isolated worktree root %s", space.WorkspacePath, worktreeRoot)
+		if opts.CreateWorktree == nil {
+			opts.CreateWorktree = func(ctx context.Context, command string, sourcePath string, root string, branch string) (isoworktree.Worktree, error) {
+				return isoworktree.CreateWithBuckley(ctx, command, sourcePath, root, branch, nil)
+			}
+		}
+		branch := isoworktree.BranchForTask(space.SpaceID, task.ID)
+		wt, err := opts.CreateWorktree(ctx, cfg.Commands.Buckley, space.WorkspacePath, worktreeRoot, branch)
+		if err != nil {
+			return out, fmt.Errorf("create isolated worktree: %w", err)
+		}
+		out.Worktree = &wt
+		space.WorkspacePath = wt.Path
+		selected.WorkspacePath = wt.Path
 	}
+	out.Selected = &selected
 	if opts.Hypha == nil {
 		opts.Hypha = executor.ShellHypha{Command: cfg.Commands.Hypha, SigningIdentity: cfg.SigningIdentity}
 	}

@@ -35,6 +35,9 @@ graft = "/tmp/graft"
 	if cfg.StateDir != filepath.Join(tmp, ".reeve", "state") {
 		t.Fatalf("StateDir=%q", cfg.StateDir)
 	}
+	if cfg.WorktreeRoot != filepath.Join(tmp, ".reeve", "worktrees") {
+		t.Fatalf("WorktreeRoot=%q", cfg.WorktreeRoot)
+	}
 	if cfg.Commands.Graft != "/tmp/graft" {
 		t.Fatalf("Graft command=%q", cfg.Commands.Graft)
 	}

@@ -213,6 +213,9 @@ func renderExecutionReport(w io.Writer, report runner.ExecutionReport) {
 	for _, warning := range report.Warnings {
 		fmt.Fprintf(w, "warn: %s\n", warning)
 	}
+	if report.Worktree != nil {
+		fmt.Fprintf(w, "worktree: %s branch=%s\n", report.Worktree.Path, report.Worktree.Branch)
+	}
 	for _, update := range report.Updates {
 		status := update.Status
 		if update.Error != "" {
@@ -310,6 +313,9 @@ func cmdDoctor(args []string, stdout io.Writer) error {
 	}
 	if cfg.StateDir != "" {
 		checkDir("state_dir", cfg.StateDir, check)
+	}
+	if cfg.WorktreeRoot != "" {
+		checkDir("worktree_root", cfg.WorktreeRoot, check)
 	}
 	if cfg.QuarantineDir != "" {
 		checkDir("quarantine_dir", cfg.QuarantineDir, check)
