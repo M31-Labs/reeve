@@ -23,6 +23,8 @@ type Trailer struct {
 	LastDisposition string  `yaml:"last_disposition,omitempty" json:"last_disposition,omitempty"`
 	LastError       string  `yaml:"last_error,omitempty" json:"last_error,omitempty"`
 	NextAttemptAt   string  `yaml:"next_attempt_at,omitempty" json:"next_attempt_at,omitempty"`
+	LandingBranch   string  `yaml:"landing_branch,omitempty" json:"landing_branch,omitempty"`
+	LandingPR       string  `yaml:"landing_pr,omitempty" json:"landing_pr,omitempty"`
 }
 
 type Task struct {

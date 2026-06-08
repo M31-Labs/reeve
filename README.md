@@ -54,6 +54,8 @@ Implemented now:
 - `reeve plan --scan --apply` creates or reopens Graft coord tasks.
 - `reeve run --execute --once` selects one managed task, creates an isolated
   Buckley worktree, wraps execution in Hyphae rituals, and updates Graft status.
+- Clean, allowed, green landed outcomes push the integration branch and open a
+  draft PR through `gh`.
 - Retry, backoff, dead-letter, quarantine, and propose-only paths have focused
   unit coverage.
 - The local test suite covers config, discovery, ranking, producers, coord
@@ -64,7 +66,6 @@ Still in progress for full v1:
 
 - Arbiter-backed ranking/governance as the final selection oracle.
 - Pool-wide multi-slot polling and refill cadence.
-- Branch push and PR creation for landed tasks.
 - Spend accounting from real Buckley token usage.
 - 2-3 live maintenance opt-in spaces and a full working-day unattended run.
 
@@ -131,6 +132,7 @@ Reeve is conservative by default.
 - Missing or invalid `priority` makes a maintenance space ineligible.
 - `mode: active` and `mode: frozen` are never auto-maintained.
 - Execution happens in an isolated Buckley worktree under `worktree_root`.
+- Landed outcomes create draft PRs; humans still merge.
 - The conductor refuses unmanaged tasks.
 - Dirty or partial worktrees are quarantined.
 - Failed tasks requeue with `retry_backoff`; exhausted tasks become dead-letter.
@@ -201,6 +203,8 @@ refill_threshold = 2
 max_retries = 3
 retry_backoff = "15m"
 assess_threshold = "aligned"
+base_branch = "main"
+draft_pr = true
 poll_interval = "60s"
 staleness_cap = "168h"
 blast_cap = 50
@@ -224,6 +228,7 @@ blast = 0.1
 hypha = "hypha"
 graft = "graft"
 buckley = "buckley"
+gh = "gh"
 go = "go"
 ```
 
@@ -254,7 +259,6 @@ and Hyphae/Graft/Buckley integrations are explicit CLI boundaries.
 
 - Replace weighted in-process ranking with Arbiter strategy evaluation.
 - Run a pool of assignments with one in-flight task per space.
-- Add branch push and PR opening for `landed` outcomes.
 - Record token spend from Buckley runs into the Reeve spend counter.
 - Seed 2-3 quiet maintenance spaces and run a full working-day unattended smoke.
 - Document the resulting traces, spores, receipts, and PR queue as the v1 proof.

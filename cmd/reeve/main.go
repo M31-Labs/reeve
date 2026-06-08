@@ -216,6 +216,9 @@ func renderExecutionReport(w io.Writer, report runner.ExecutionReport) {
 	if report.Worktree != nil {
 		fmt.Fprintf(w, "worktree: %s branch=%s\n", report.Worktree.Path, report.Worktree.Branch)
 	}
+	if report.Landing != nil {
+		fmt.Fprintf(w, "landing: branch=%s pr=%s\n", report.Landing.Branch, report.Landing.PRURL)
+	}
 	for _, update := range report.Updates {
 		status := update.Status
 		if update.Error != "" {
@@ -323,9 +326,11 @@ func cmdDoctor(args []string, stdout io.Writer) error {
 	checkCommand("hypha", cfg.Commands.Hypha, check)
 	checkCommand("graft", cfg.Commands.Graft, check)
 	checkCommand("buckley", cfg.Commands.Buckley, check)
+	checkCommand("gh", cfg.Commands.GH, check)
 	checkCommand("go", cfg.Commands.Go, check)
 	checkCommandRun("graft_health", cfg.Commands.Graft, []string{"version"}, check)
 	checkCommandRun("buckley_health", cfg.Commands.Buckley, []string{"doctor"}, check)
+	checkCommandRun("gh_health", cfg.Commands.GH, []string{"auth", "status"}, check)
 	checkCommandRun("go_health", cfg.Commands.Go, []string{"version"}, check)
 
 	if *jsonOut {

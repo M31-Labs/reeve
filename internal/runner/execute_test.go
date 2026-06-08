@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"m31labs.dev/reeve/internal/config"
 	"m31labs.dev/reeve/internal/coord"
 	"m31labs.dev/reeve/internal/executor"
+	"m31labs.dev/reeve/internal/landing"
 	"m31labs.dev/reeve/internal/taskplan"
 	isoworktree "m31labs.dev/reeve/internal/worktree"
 	_ "modernc.org/sqlite"
@@ -101,6 +103,7 @@ func TestExecuteOnceUpdatesStatusAroundLifecycle(t *testing.T) {
 	desc := managedDescription(t, "build", "hypha://m31labs/reeve", 0.9, 0)
 	cfg := executionConfig(t, tmp, dbPath, []string{taskJSON("task-1", "Fix build", "pending", desc)})
 	var updates []string
+	var terminalDescription string
 	report, err := ExecuteOnce(context.Background(), cfg, ExecutionOptions{
 		Hypha:                    &execFakeHypha{},
 		Worktree:                 &execFakeWorktree{heads: []string{"abc", "def"}},
@@ -108,8 +111,19 @@ func TestExecuteOnceUpdatesStatusAroundLifecycle(t *testing.T) {
 		RunBuckley: func(context.Context, taskplan.CreateSpec, executor.TaskRunOptions) executor.BuckleyRun {
 			return executor.BuckleyRun{ExitCode: 0, Approval: executor.ApprovalAllow}
 		},
+		LandPR: func(_ context.Context, opts landing.Options) (landing.Result, error) {
+			if opts.Title != "Reeve: Fix build" || opts.Workdir == "" {
+				t.Fatalf("landing opts=%#v", opts)
+			}
+			return landing.Result{Branch: "reeve/task-1", PRURL: "https://github.com/M31-Labs/reeve/pull/1"}, nil
+		},
 		UpdateExec: func(_ context.Context, _ string, args []string) ([]byte, error) {
 			updates = append(updates, strings.Join(args, " "))
+			for i, arg := range args {
+				if arg == "--description" && i+1 < len(args) {
+					terminalDescription = args[i+1]
+				}
+			}
 			return []byte(`{"ok":true}`), nil
 		},
 	})
@@ -124,6 +138,57 @@ func TestExecuteOnceUpdatesStatusAroundLifecycle(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("updates missing %q:\n%s", want, joined)
 		}
+	}
+	if report.Landing == nil || report.Landing.PRURL == "" {
+		t.Fatalf("landing=%#v", report.Landing)
+	}
+	trailer, err := coord.ParseTrailer(terminalDescription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trailer.LandingBranch != "reeve/task-1" || trailer.LandingPR == "" || trailer.LastDisposition != string(executor.StateLanded) {
+		t.Fatalf("trailer=%#v", trailer)
+	}
+}
+
+func TestExecuteOnceRequeuesWhenLandingFails(t *testing.T) {
+	tmp := t.TempDir()
+	dbPath := writeExecutionIndex(t, tmp, `{"uri":"hypha://m31labs/reeve","mode":"maintenance","priority":0.8}`)
+	desc := managedDescription(t, "build", "hypha://m31labs/reeve", 0.9, 0)
+	cfg := executionConfig(t, tmp, dbPath, []string{taskJSON("task-1", "Fix build", "pending", desc)})
+	var terminalDescription string
+	report, err := ExecuteOnce(context.Background(), cfg, ExecutionOptions{
+		Hypha:                    &execFakeHypha{},
+		Worktree:                 &execFakeWorktree{heads: []string{"abc", "def"}},
+		AllowRegisteredWorkspace: true,
+		Now:                      time.Date(2026, 6, 8, 8, 0, 0, 0, time.UTC),
+		RunBuckley: func(context.Context, taskplan.CreateSpec, executor.TaskRunOptions) executor.BuckleyRun {
+			return executor.BuckleyRun{ExitCode: 0, Approval: executor.ApprovalAllow}
+		},
+		LandPR: func(context.Context, landing.Options) (landing.Result, error) {
+			return landing.Result{Branch: "reeve/task-1"}, errors.New("gh failed")
+		},
+		UpdateExec: func(_ context.Context, _ string, args []string) ([]byte, error) {
+			for i, arg := range args {
+				if arg == "--description" && i+1 < len(args) {
+					terminalDescription = args[i+1]
+				}
+			}
+			return []byte(`{"ok":true}`), nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "land PR") {
+		t.Fatalf("report=%#v err=%v", report, err)
+	}
+	if report.Updates[len(report.Updates)-1].Status != "pending" {
+		t.Fatalf("updates=%#v", report.Updates)
+	}
+	trailer, err := coord.ParseTrailer(terminalDescription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trailer.LastDisposition != string(executor.StateFailed) || !strings.Contains(trailer.LastError, "gh failed") {
+		t.Fatalf("trailer=%#v", trailer)
 	}
 }
 

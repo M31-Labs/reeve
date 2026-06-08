@@ -36,6 +36,8 @@ type Config struct {
 	MaxRetries      int             `toml:"max_retries" json:"max_retries"`
 	RetryBackoff    Duration        `toml:"retry_backoff" json:"retry_backoff"`
 	AssessThreshold string          `toml:"assess_threshold" json:"assess_threshold"`
+	BaseBranch      string          `toml:"base_branch" json:"base_branch"`
+	DraftPR         bool            `toml:"draft_pr" json:"draft_pr"`
 	PollInterval    Duration        `toml:"poll_interval" json:"poll_interval"`
 	StalenessCap    Duration        `toml:"staleness_cap" json:"staleness_cap"`
 	BlastCap        int             `toml:"blast_cap" json:"blast_cap"`
@@ -65,6 +67,7 @@ type Commands struct {
 	Hypha   string `toml:"hypha" json:"hypha"`
 	Graft   string `toml:"graft" json:"graft"`
 	Buckley string `toml:"buckley" json:"buckley"`
+	GH      string `toml:"gh" json:"gh"`
 	Go      string `toml:"go" json:"go"`
 }
 
@@ -84,6 +87,8 @@ func DefaultConfig() Config {
 		MaxRetries:      3,
 		RetryBackoff:    Duration{Duration: 15 * time.Minute},
 		AssessThreshold: "aligned",
+		BaseBranch:      "main",
+		DraftPR:         true,
 		PollInterval:    Duration{Duration: 60 * time.Second},
 		StalenessCap:    Duration{Duration: 168 * time.Hour},
 		BlastCap:        50,
@@ -105,6 +110,7 @@ func DefaultConfig() Config {
 			Hypha:   "hypha",
 			Graft:   "graft",
 			Buckley: "buckley",
+			GH:      "gh",
 			Go:      "go",
 		},
 	}
@@ -154,6 +160,9 @@ func Normalize(cfg Config) (Config, error) {
 	if cfg.AssessThreshold == "" {
 		cfg.AssessThreshold = def.AssessThreshold
 	}
+	if cfg.BaseBranch == "" {
+		cfg.BaseBranch = def.BaseBranch
+	}
 	if cfg.PollInterval.Duration == 0 {
 		cfg.PollInterval = def.PollInterval
 	}
@@ -198,6 +207,12 @@ func Normalize(cfg Config) (Config, error) {
 	}
 	if cfg.Commands.Buckley == def.Commands.Buckley {
 		cfg.Commands.Buckley = resolveDefaultBuckley(cfg.Commands.Buckley)
+	}
+	if cfg.Commands.GH == "" {
+		cfg.Commands.GH = def.Commands.GH
+	}
+	if cfg.Commands.GH == def.Commands.GH {
+		cfg.Commands.GH = resolveDefaultCommand(cfg.Commands.GH)
 	}
 	if cfg.Commands.Go == "" {
 		cfg.Commands.Go = def.Commands.Go
@@ -326,6 +341,8 @@ refill_threshold = 2
 max_retries = 3
 retry_backoff = "15m"
 assess_threshold = "aligned"
+base_branch = "main"
+draft_pr = true
 poll_interval = "60s"
 staleness_cap = "168h"
 blast_cap = 50
@@ -349,6 +366,7 @@ blast = 0.1
 hypha = "hypha"
 graft = "graft"
 buckley = "buckley"
+gh = "gh"
 go = "go"
 `
 }

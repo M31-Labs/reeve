@@ -14,6 +14,7 @@ import (
 	"m31labs.dev/reeve/internal/executor"
 	"m31labs.dev/reeve/internal/fleet"
 	"m31labs.dev/reeve/internal/graftcoord"
+	"m31labs.dev/reeve/internal/landing"
 	"m31labs.dev/reeve/internal/ranking"
 	isoworktree "m31labs.dev/reeve/internal/worktree"
 )
@@ -26,6 +27,7 @@ type ExecutionOptions struct {
 	Worktree                 executor.WorktreeOps
 	CreateWorktree           func(context.Context, string, string, string, string) (isoworktree.Worktree, error)
 	RunBuckley               executor.BuckleySpecRunner
+	LandPR                   func(context.Context, landing.Options) (landing.Result, error)
 	UpdateExec               graftcoord.ExecFunc
 }
 
@@ -34,6 +36,7 @@ type ExecutionReport struct {
 	DryRun      bool                      `json:"dry_run"`
 	Selected    *ExecutableCandidate      `json:"selected,omitempty"`
 	Worktree    *isoworktree.Worktree     `json:"worktree,omitempty"`
+	Landing     *landing.Result           `json:"landing,omitempty"`
 	Updates     []graftcoord.UpdateResult `json:"updates,omitempty"`
 	Result      *executor.LifecycleResult `json:"result,omitempty"`
 	Warnings    []string                  `json:"warnings,omitempty"`
@@ -123,6 +126,27 @@ func ExecuteOnce(ctx context.Context, cfg config.Config, opts ExecutionOptions) 
 		BuckleyCommand:  cfg.Commands.Buckley,
 	}, opts.Hypha, opts.Worktree, opts.RunBuckley)
 	out.Result = &result
+	if lifecycleErr == nil && result.Decision.State == executor.StateLanded {
+		if opts.LandPR == nil {
+			opts.LandPR = func(ctx context.Context, options landing.Options) (landing.Result, error) {
+				return landing.LandPR(ctx, options, nil)
+			}
+		}
+		landed, err := opts.LandPR(ctx, landing.Options{
+			GHCommand:  cfg.Commands.GH,
+			BaseBranch: cfg.BaseBranch,
+			Draft:      cfg.DraftPR,
+			Title:      "Reeve: " + task.Title,
+			Body:       landingBody(task, result),
+			Workdir:    space.WorkspacePath,
+		})
+		out.Landing = &landed
+		if err != nil {
+			lifecycleErr = fmt.Errorf("land PR: %w", err)
+		} else {
+			task = taskWithLanding(task, landed)
+		}
+	}
 	status, description, reason := terminalUpdate(task, result.Decision, lifecycleErr, cfg.MaxRetries, cfg.RetryBackoff.Duration, now)
 	done := graftcoord.UpdateTask(ctx, cfg.Commands.Graft, graftcoord.TaskUpdate{
 		TaskID:      task.ID,
@@ -137,6 +161,36 @@ func ExecuteOnce(ctx context.Context, cfg config.Config, opts ExecutionOptions) 
 		return out, lifecycleErr
 	}
 	return out, nil
+}
+
+func landingBody(task coord.Task, result executor.LifecycleResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Automated Reeve maintenance change.\n\n")
+	fmt.Fprintf(&b, "- Task: `%s`\n", task.ID)
+	fmt.Fprintf(&b, "- Space: `%s`\n", task.Trailer.SpaceURI)
+	fmt.Fprintf(&b, "- Signal: `%s`\n", task.Trailer.SignalKind)
+	fmt.Fprintf(&b, "- Target: `%s`\n", task.Trailer.Target)
+	if result.TraceID != "" {
+		fmt.Fprintf(&b, "- Trace: `%s`\n", result.TraceID)
+	}
+	if result.Green.Command != "" {
+		fmt.Fprintf(&b, "- Green check: `%s` exited `%d`\n", result.Green.Command, result.Green.ExitCode)
+	}
+	fmt.Fprintf(&b, "\nHuman merge required. Reeve v1 never auto-merges to `main`.\n")
+	return b.String()
+}
+
+func taskWithLanding(task coord.Task, landed landing.Result) coord.Task {
+	next := task.Trailer
+	next.LandingBranch = landed.Branch
+	next.LandingPR = landed.PRURL
+	description, err := coord.ReplaceTrailer(task.Description, next)
+	if err != nil {
+		return task
+	}
+	task.Description = description
+	task.Trailer = next
+	return task
 }
 
 func executableCandidates(spaces []fleet.SpaceStatus, tasks []coord.Task, cfg config.Config, now time.Time) []ExecutableCandidate {

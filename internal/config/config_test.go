@@ -35,6 +35,9 @@ graft = "/tmp/graft"
 	if cfg.RetryBackoff.Duration != 15*time.Minute {
 		t.Fatalf("RetryBackoff=%s", cfg.RetryBackoff)
 	}
+	if cfg.BaseBranch != "main" || !cfg.DraftPR {
+		t.Fatalf("BaseBranch=%q DraftPR=%v", cfg.BaseBranch, cfg.DraftPR)
+	}
 	if cfg.StateDir != filepath.Join(tmp, ".reeve", "state") {
 		t.Fatalf("StateDir=%q", cfg.StateDir)
 	}
