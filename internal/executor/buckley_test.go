@@ -10,14 +10,14 @@ import (
 
 func TestCommandForBuckleyOneShot(t *testing.T) {
 	got, err := CommandForBuckley(BuckleyInvocation{
-		Command: "/home/draco/go/bin/buckley",
+		Command: "/home/user/go/bin/buckley",
 		Prompt:  "Fix the failing tests",
 		Model:   "codex/gpt-5",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"/home/draco/go/bin/buckley", "--plain", "--no-color", "-m", "codex/gpt-5", "-p", "Fix the failing tests"}
+	want := []string{"/home/user/go/bin/buckley", "--plain", "--no-color", "-m", "codex/gpt-5", "-p", "Fix the failing tests"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv mismatch\ngot:  %#v\nwant: %#v", got, want)
 	}

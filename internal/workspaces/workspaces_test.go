@@ -3,7 +3,7 @@ package workspaces
 import "testing"
 
 func TestParseJSONAcceptsCommonShapes(t *testing.T) {
-	body := []byte(`{"workspaces":[{"name":"reeve","path":"/home/draco/work/reeve"}],"hyphae":"/home/draco/work/hyphae"}`)
+	body := []byte(`{"workspaces":[{"name":"reeve","path":"/home/user/work/reeve"}],"hyphae":"/home/user/work/hyphae"}`)
 	got, err := ParseJSON(body)
 	if err != nil {
 		t.Fatal(err)
